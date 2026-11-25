@@ -1,0 +1,10 @@
+/* Copyright 2026 davenonymous
+ *
+ * The only symbol the stand-in exports: SourceMod's entry point. libcurl,
+ * Mbed TLS, nlohmann/json and libstdc++ stay local. */
+{
+	global:
+		GetSMExtAPI;
+	local:
+		*;
+};

@@ -1,0 +1,16 @@
+[
+  { "url": "http://api.test/team/4242", "body_file": "bodies/team.json" },
+  { "url": "http://api.test/search?b=2&a=1", "body": "sorted" },
+  { "url": "http://api.test/first", "body": "first" },
+  { "url": "http://api.test/first", "body": "second" },
+  { "url": "http://api.test/wild/*/end", "body_file": "bodies/hello.txt" },
+  { "method": "POST", "url": "http://api.test/created", "status": 201,
+    "headers": { "X-Test": "yes", "Content-Type": "text/x-custom" }, "body": "made" },
+  { "url": "http://api.test/slow", "body": "late", "delay_frames": 5 },
+  { "url": "http://api.test/broken", "fail": "io" },
+  { "url": "http://api.test/hangs", "fail": "timeout" },
+  { "url": "http://api.test/digits", "body_file": "bodies/digits.bin" },
+  { "method": "HEAD", "url": "http://api.test/digits", "body_file": "bodies/digits.bin" },
+  { "method": "HEAD", "url": "http://api.test/sized", "headers": { "Content-Length": "12345678" } },
+  { "url": "http://api.test/never", "body": "late", "delay_frames": 1000 }
+]

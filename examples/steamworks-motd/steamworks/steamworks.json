@@ -1,0 +1,3 @@
+[
+  { "url": "http://motd.test/motd.txt", "body_file": "motd.txt" }
+]

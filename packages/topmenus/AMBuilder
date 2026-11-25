@@ -1,0 +1,24 @@
+# vim: set sts=2 ts=8 sw=2 tw=99 et ft=python:
+# Copyright 2026 davenonymous
+#
+# SourceMod's Top Menus extension (topmenus.ext.so) from the SourceMod
+# checkout, unchanged, with the flags SourceMod's extensions/topmenus/AMBuilder
+# gives it. The runner puts it into every sandbox, as SourceMod ships it.
+import os
+
+topmenus_root = os.path.join(Project.sm_root, 'extensions', 'topmenus')
+
+for cxx in builder.targets:
+  binary = cxx.Library('topmenus.ext')
+  compiler = binary.compiler
+  compiler.cxxincludes += [topmenus_root] + Project.sm_includes()
+  compiler.cxxflags += ['-fno-rtti']
+  binary.sources += [
+    os.path.join(topmenus_root, 'extension.cpp'),
+    os.path.join(topmenus_root, 'smn_topmenus.cpp'),
+    os.path.join(topmenus_root, 'TopMenu.cpp'),
+    os.path.join(topmenus_root, 'TopMenuManager.cpp'),
+    os.path.join(Project.sm_root, 'public', 'smsdk_ext.cpp'),
+    os.path.join(Project.sm_root, 'public', 'amtl', 'compat', 'stdcxx.cpp'),
+  ]
+  builder.Add(binary)

@@ -1,0 +1,36 @@
+# vim: set sts=2 ts=8 sw=2 tw=99 et ft=python:
+# Copyright 2026 davenonymous
+#
+# SourceMod's logic library (sourcemod.logic.so) from the SourceMod checkout,
+# unchanged. The source list is read from SourceMod's own core/logic/AMBuilder
+# so that it follows the checkout; the flags are those SourceMod gives it.
+# Built without SM_GENERATED_BUILD, so it reports version "1.12.0-manual".
+import os
+import re
+
+logic_root = os.path.join(Project.sm_root, 'core', 'logic')
+
+def ReadLogicSources(arch):
+  with open(os.path.join(logic_root, 'AMBuilder')) as script:
+    text = script.read()
+  lists = re.findall(r"binary\.sources \+= \[(.*?)\]", text, re.S)
+  if len(lists) < 1:
+    raise Exception('could not read the source list of ' + logic_root + '/AMBuilder')
+  sources = re.findall(r"'([^']+\.cpp)'", lists[0])
+  if arch == 'x86_64':
+    sources += re.findall(r"'([^']+\.cpp)'", ''.join(lists[1:]))
+  return [os.path.join(logic_root, source) for source in sources]
+
+for cxx in builder.targets:
+  binary = cxx.Library('sourcemod.logic')
+  compiler = binary.compiler
+  compiler.cxxincludes += [
+    Project.sm_root,
+    logic_root,
+  ] + Project.sm_includes()
+  compiler.defines += ['SM_DEFAULT_THREADER', 'SM_LOGIC']
+  compiler.cxxflags += ['-fno-rtti']
+  compiler.postlink += ['-lpthread', '-lrt']
+  binary.sources += ReadLogicSources(cxx.target.arch)
+  binary.sources += [os.path.join(Project.sm_root, 'public', 'amtl', 'compat', 'stdcxx.cpp')]
+  builder.Add(binary)

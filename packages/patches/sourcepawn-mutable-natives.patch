@@ -1,0 +1,106 @@
+--- a/vm/plugin-runtime.cpp
++++ b/vm/plugin-runtime.cpp
+@@ -28,10 +28,23 @@
+ #include "method-info.h"
+ #include "method-verifier.h"
+ #include "plugin-context.h"
++#include "dll_exports.h"
+ 
+ using namespace sp;
+ using namespace SourcePawn;
+ 
++// smrunner: the runner is told of every change of a native's binding, so
++// that its hooks follow SourceMod's own rebinding (a provider plugin
++// reloaded, an optional native bound late). One listener, null for none.
++typedef void (*SmRunnerNativeBindingListener)(IPluginRuntime* runtime, uint32_t index);
++static SmRunnerNativeBindingListener sNativeBindingListener = nullptr;
++
++EXPORTFUNC void
++SmRunnerSetNativeBindingListener(SmRunnerNativeBindingListener listener)
++{
++  sNativeBindingListener = listener;
++}
++
+ PluginRuntime::PluginRuntime(LegacyImage* image)
+  : image_(image),
+    paused_(false),
+@@ -281,20 +294,17 @@ PluginRuntime::UpdateNativeBinding(uint32_t index, SPVM_NATIVE_FUNC pfn, uint32_
+ 
+   NativeEntry* native = &natives_[index];
+ 
+-  // The native must either be unbound, or it must be ephemeral or optional.
+-  // Otherwise, we've already baked its address in at callsites and it's too
+-  // late to fix them.
+-  if (native->status == SP_NATIVE_BOUND &&
+-      !(native->flags & (SP_NTVFLAG_OPTIONAL|SP_NTVFLAG_EPHEMERAL)))
+-  {
+-    return SP_ERROR_PARAM;
+-  }
++  // smrunner: natives may be rebound at any time (tests hook and mock
++  // them); call sites never bake a native's address in (see jit_x86.cpp and
++  // pcode-reader.h), so a new binding takes effect at once.
+ 
+   native->legacy_fn = pfn;
+   native->callback = nullptr;
+   native->status = pfn ? SP_NATIVE_BOUND : SP_NATIVE_UNBOUND;
+   native->flags = flags;
+   native->user = data;
++  if (sNativeBindingListener)
++    sNativeBindingListener(this, index);
+   return SP_ERROR_NONE;
+ }
+ 
+@@ -308,20 +318,17 @@ PluginRuntime::UpdateNativeBindingObject(uint32_t index, INativeCallback* callba
+ 
+   NativeEntry* native = &natives_[index];
+ 
+-  // The native must either be unbound, or it must be ephemeral or optional.
+-  // Otherwise, we've already baked its address in at callsites and it's too
+-  // late to fix them.
+-  if (native->status == SP_NATIVE_BOUND &&
+-      !(native->flags & (SP_NTVFLAG_OPTIONAL|SP_NTVFLAG_EPHEMERAL)))
+-  {
+-    return SP_ERROR_PARAM;
+-  }
++  // smrunner: natives may be rebound at any time (tests hook and mock
++  // them); call sites never bake a native's address in (see jit_x86.cpp and
++  // pcode-reader.h), so a new binding takes effect at once.
+ 
+   native->legacy_fn = nullptr;
+   native->callback = callback;
+   native->status = callback ? SP_NATIVE_BOUND : SP_NATIVE_UNBOUND;
+   native->flags = flags;
+   native->user = data;
++  if (sNativeBindingListener)
++    sNativeBindingListener(this, index);
+   return SP_ERROR_NONE;
+ }
+ 
+--- a/vm/x86/jit_x86.cpp
++++ b/vm/x86/jit_x86.cpp
+@@ -1394,8 +1394,9 @@ Compiler::emitLegacyNativeCall(uint32_t native_index, NativeEntry* native)
+   __ push(edx);
+ 
+   // Check whether the native is bound.
+-  bool immutable = native->status == SP_NATIVE_BOUND &&
+-                   !(native->flags & (SP_NTVFLAG_EPHEMERAL|SP_NTVFLAG_OPTIONAL));
++  // smrunner: every native is called through its table entry, so that it
++  // can be rebound after this code was compiled.
++  bool immutable = false;
+   if (!immutable) {
+     __ movl(edx, Operand(ExternalAddress(&native->status)));
+     __ cmpl(edx, SP_NATIVE_BOUND);
+--- a/vm/pcode-reader.h
++++ b/vm/pcode-reader.h
+@@ -497,8 +497,10 @@ class PcodeReader
+       cell_t index = readCell();
+       cell_t nparams = readCell();
+ 
++      // smrunner: natives are never replaced by opcodes, so that every call
++      // goes to the native's current binding.
+       NativeEntry* native = rt_->NativeAt(index);
+-      if (native->status == SP_NATIVE_BOUND &&
++      if (false && native->status == SP_NATIVE_BOUND &&
+           !(native->flags & (SP_NTVFLAG_EPHEMERAL|SP_NTVFLAG_OPTIONAL)))
+       {
+         uint32_t replacement = rt_->GetNativeReplacement(index);

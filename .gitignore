@@ -1,0 +1,16 @@
+# Never tracked: Claude's working files, ADRs, reports, editor configs, the
+# local build and its output
+/dist/
+/.claude/
+/CLAUDE.md
+/CONTEXT.md
+/docs/adr
+.cache/
+.spcomp-lsp.json
+code-review-*.html
+architecture-*.html
+HANDOVER.md
+PLAN.md
+depl.sh
+/Dockerfile
+/build.sh

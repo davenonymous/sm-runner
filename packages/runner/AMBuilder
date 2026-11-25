@@ -1,0 +1,38 @@
+# vim: set sts=2 ts=8 sw=2 tw=99 et ft=python:
+# Copyright 2026 davenonymous
+#
+# smrunner, for every target architecture: every .cpp below src/, against
+# SourceMod's public, core and bridge headers, with SourcePawn's zlib.
+import os
+
+source_root = os.path.join(builder.currentSourcePath, 'src')
+sources = []
+for folder, _, files in os.walk(source_root):
+  for name in sorted(files):
+    if name.endswith('.cpp'):
+      sources.append(os.path.join(folder, name))
+
+for cxx in builder.targets:
+  binary = cxx.Program('smrunner')
+  compiler = binary.compiler
+  compiler.cxxincludes += [
+    source_root,
+    os.path.join(builder.currentSourcePath, 'public'),
+    Project.sm_root,
+    os.path.join(Project.sm_root, 'core'),
+    os.path.join(Project.sp_root, 'third_party', 'zlib'),
+  ] + Project.sm_includes()
+  compiler.cxxflags += ['-Wno-unused-parameter']
+  compiler.linkflags += ['-lpthread', '-ldl']
+  compiler.postlink += [Project.sp_static_library(cxx.target.arch, 'third_party', 'zlib', 'z', 'libz.a')]
+  binary.sources += sorted(sources)
+  builder.Add(binary)
+
+# The stand-ins for the game binaries the game configs name.
+for cxx in builder.targets:
+  for name in ['server_srv', 'engine_srv']:
+    standin = cxx.Library(name)
+    standin.compiler.cflags = [flag for flag in standin.compiler.cflags if flag != '-fvisibility=hidden']
+    standin.compiler.linkflags = [flag for flag in standin.compiler.linkflags if flag != '-static-libstdc++']
+    standin.sources += [os.path.join(builder.currentSourcePath, 'standin', 'standin.c')]
+    builder.Add(standin)

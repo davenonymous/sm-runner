@@ -1,0 +1,274 @@
+# Copyright 2026 davenonymous
+#
+# Builds smrunner on every push, pull request and manual run, natively on
+# Ubuntu 22.04 for x86 and x86_64: SourcePawn of the pinned SourceMod commit
+# with the patches of packages/patches/, the SteamWorks stand-in's libraries from
+# vcpkg (cached), SourceMod's logic library, smrunner, the stand-ins and Top
+# Menus. It checks the stand-in's exports and the binaries' glibc version,
+# lays out the install tree with SourceMod's files from the pinned release
+# package, compiles the self tests and the examples with that package's
+# spcomp, runs them with both runners (tests/run.sh) and packs the tree as
+# smrunner-<label>-linux.tar.gz under a top-level smrunner/. For a pushed v*
+# tag it also publishes the archive as a GitHub release, after checking that
+# the tag matches the version in packages/runner/src/version.h.
+
+name: CI
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+env:
+  # The commit of SourceMod's release 1.12.0.7263; the release package
+  # below must be the same build.
+  SOURCEMOD_COMMIT: b84d922dccee2d9ad095893b8770014b1ed58cf6
+  SOURCEMOD_PACKAGE_URL: https://github.com/alliedmodders/sourcemod/releases/download/1.12.0.7263/sourcemod-1.12.0-git7263-linux.tar.gz
+  SOURCEMOD_PACKAGE_SHA256: 42b2289a0089790661714d661b389135151fd926d309848565e2f7e64f8e7983
+  # Metamod:Source on 1.11-dev, for SourceHook's headers.
+  METAMOD_COMMIT: 7ff2d97bdad1493b809c5ec91bbfc7abc6ae5445
+  AMBUILD_COMMIT: 5b0aa725beef33c9cf6a1b00659a010c3d9120d3
+  # SMJansson for the JSON example, SteamWorks 1.2.167's include for the
+  # stand-in's self tests and example; smrunner ships neither.
+  SMJANSSON_URL: https://github.com/davenonymous/SMJansson/releases/download/v2.15.1-1/smjansson-v2.15.1-1-linux.tar.gz
+  SMJANSSON_SHA256: b26cd5f68ddc346a70eb0a2592e531f9c87ee3745f941188ebff3c46b6f78806
+  STEAMWORKS_URL: https://github.com/alliedmodders/SM-SteamWorks/releases/download/v1.2.167/SteamWorks-1.2.167-sm1.12-linux.tar.gz
+  STEAMWORKS_SHA256: af5d01b170b866f9e377d3739bded46138044cc54fb7c381ba77d34e07bb783c
+  # smrunner's binaries may require at most this glibc version.
+  MAX_GLIBC: '2.35'
+
+jobs:
+  linux:
+    name: Build and test (linux)
+    runs-on: ubuntu-22.04
+    defaults:
+      run:
+        shell: bash
+
+    steps:
+      - name: Install packages
+        run: |
+          sudo dpkg --add-architecture i386
+          sudo apt-get update
+          sudo apt-get install -yq --no-install-recommends \
+            clang gcc-multilib g++-multilib libc6-i386 lib32stdc++6 curl zip unzip pkg-config make
+
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          path: smrunner
+
+      - name: Checkout SourceMod
+        uses: actions/checkout@v4
+        with:
+          repository: alliedmodders/sourcemod
+          ref: ${{ env.SOURCEMOD_COMMIT }}
+          path: sourcemod
+          submodules: recursive
+
+      - name: Checkout Metamod:Source
+        uses: actions/checkout@v4
+        with:
+          repository: alliedmodders/metamod-source
+          ref: ${{ env.METAMOD_COMMIT }}
+          path: metamod
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install AMBuild
+        run: pip install "git+https://github.com/alliedmodders/ambuild@${AMBUILD_COMMIT}"
+
+      # libcurl with Mbed TLS and nlohmann/json, static and
+      # position-independent for x86 and x64, from vcpkg at the commit
+      # packages/vcpkg/vcpkg.json names as its builtin-baseline. One install root per
+      # architecture: in manifest mode an install removes what another
+      # triplet installed before. vcpkg builds with gcc.
+      - name: Cache the vcpkg libraries
+        id: vcpkg-cache
+        uses: actions/cache@v4
+        with:
+          path: libs
+          key: vcpkg-libs-${{ runner.os }}-${{ hashFiles('smrunner/packages/vcpkg/**') }}
+
+      - name: Build the vcpkg libraries
+        if: steps.vcpkg-cache.outputs.cache-hit != 'true'
+        run: |
+          baseline=$(python -c 'import json; print(json.load(open("smrunner/packages/vcpkg/vcpkg.json"))["builtin-baseline"])')
+          git init -q vcpkg-tool
+          git -C vcpkg-tool fetch -q --depth 1 https://github.com/microsoft/vcpkg "$baseline"
+          git -C vcpkg-tool checkout -q FETCH_HEAD
+          vcpkg-tool/bootstrap-vcpkg.sh -disableMetrics
+          mkdir -p libs
+          cd smrunner/packages/vcpkg
+          for arch in x86 x64; do
+            "$GITHUB_WORKSPACE/vcpkg-tool/vcpkg" install --triplet "$arch-linux-smrunner" --host-triplet x64-linux \
+              --x-install-root="$GITHUB_WORKSPACE/libs-$arch" --clean-after-build
+            mv "$GITHUB_WORKSPACE/libs-$arch/$arch-linux-smrunner" "$GITHUB_WORKSPACE/libs/$arch"
+            rm -rf "$GITHUB_WORKSPACE/libs-$arch"
+          done
+          ls "$GITHUB_WORKSPACE/libs/x86/lib" "$GITHUB_WORKSPACE/libs/x64/lib"
+
+      - name: Build SourcePawn
+        run: |
+          export CC=clang CXX=clang++
+          for patch in smrunner/packages/patches/sourcepawn-*.patch; do
+            git -C sourcemod/sourcepawn apply "$GITHUB_WORKSPACE/$patch"
+          done
+          mkdir -p build/sourcepawn
+          cd build/sourcepawn
+          python "$GITHUB_WORKSPACE/sourcemod/sourcepawn/configure.py" --enable-optimize --targets=x86,x86_64
+          ambuild
+
+      - name: Build smrunner
+        run: |
+          export CC=clang CXX=clang++
+          mkdir -p build/smrunner
+          cd build/smrunner
+          python "$GITHUB_WORKSPACE/smrunner/configure.py" --enable-optimize --targets=x86,x86_64 \
+            --sm-path="$GITHUB_WORKSPACE/sourcemod" --mms-path="$GITHUB_WORKSPACE/metamod" \
+            --sp-build="$GITHUB_WORKSPACE/build/sourcepawn" --libs-path="$GITHUB_WORKSPACE/libs"
+          ambuild
+
+      - name: Fetch SourceMod's release package, SMJansson and SteamWorks
+        run: |
+          fetch() {
+            curl -fsSL -o "$2" "$1"
+            echo "$3  $2" | sha256sum -c -
+            mkdir -p "${2%.tar.gz}"
+            tar -xzf "$2" -C "${2%.tar.gz}"
+          }
+          mkdir -p downloads
+          fetch "$SOURCEMOD_PACKAGE_URL" downloads/sourcemod.tar.gz "$SOURCEMOD_PACKAGE_SHA256"
+          fetch "$SMJANSSON_URL" downloads/smjansson.tar.gz "$SMJANSSON_SHA256"
+          fetch "$STEAMWORKS_URL" downloads/steamworks.tar.gz "$STEAMWORKS_SHA256"
+
+      - name: Lay out the install tree
+        run: |
+          out=stage/smrunner
+          b=build/smrunner
+          sp=build/sourcepawn
+          mkdir -p "$out/bin" "$out/lib/x86" "$out/lib/x64" "$out/licenses/smrunner" "$out/licenses/sourcemod"
+          strip --strip-debug -o "$out/bin/smrunner" "$b/packages/runner/smrunner/linux-x86/smrunner"
+          strip --strip-debug -o "$out/bin/smrunner64" "$b/packages/runner/smrunner/linux-x86_64/smrunner"
+          for arch in x86:x86 x86_64:x64; do
+            from="${arch%%:*}"
+            to="${arch##*:}"
+            strip --strip-debug -o "$out/lib/$to/sourcemod.logic.so" "$b/packages/logic/sourcemod.logic/linux-$from/sourcemod.logic.so"
+            strip --strip-debug -o "$out/lib/$to/libsourcepawn.so" "$sp/libsourcepawn/linux-$from/libsourcepawn.so"
+            strip --strip-debug -o "$out/lib/$to/topmenus.ext.so" "$b/packages/topmenus/topmenus.ext/linux-$from/topmenus.ext.so"
+            strip --strip-debug -o "$out/lib/$to/SteamWorks.ext.so" "$b/packages/steamworks/SteamWorks.ext/linux-$from/SteamWorks.ext.so"
+            cp "$b/packages/runner/server_srv/linux-$from/server_srv.so" "$b/packages/runner/engine_srv/linux-$from/engine_srv.so" "$out/lib/$to/"
+          done
+          for library in curl mbedtls nlohmann-json zlib; do
+            cp "libs/x86/share/$library/copyright" "$out/licenses/$library.txt"
+          done
+          pkg=downloads/sourcemod
+          sm="$pkg/addons/sourcemod"
+          mkdir -p "$out/share/sourcemod/plugins"
+          cp -r "$sm/configs" "$sm/gamedata" "$sm/translations" "$out/share/sourcemod/"
+          cp -r "$pkg/cfg/sourcemod" "$out/share/sourcemod/cfg"
+          cp "$sm"/plugins/*.smx "$sm"/plugins/disabled/*.smx "$out/share/sourcemod/plugins/"
+          cp "$sm/LICENSE.txt" "$sm/GPLv3.txt" "$out/licenses/sourcemod/"
+          cp -r smrunner/scripting/include "$out/share/include"
+          cp smrunner/LICENSE.txt smrunner/licenses/* "$out/licenses/smrunner/"
+
+      - name: Check the binaries' exports and glibc version
+        run: |
+          for binary in stage/smrunner/lib/*/SteamWorks.ext.so; do
+            exported=$(nm -D --defined-only "$binary" | awk '{print $3}' | grep -v '^$' | sort | tr '\n' ' ')
+            if [ "$exported" != "GetSMExtAPI " ]; then
+              echo "::error::$binary exports $exported"
+              exit 1
+            fi
+          done
+          for binary in stage/smrunner/bin/* stage/smrunner/lib/*/*.so; do
+            needed=$(objdump -T "$binary" | grep -o 'GLIBC_[0-9.]*' | sed 's/GLIBC_//' | sort -uV | tail -1)
+            echo "$binary needs glibc $needed"
+            if [ "$(printf '%s\n%s\n' "$needed" "$MAX_GLIBC" | sort -V | tail -1)" != "$MAX_GLIBC" ]; then
+              echo "::error::$binary needs glibc $needed, more than $MAX_GLIBC"
+              exit 1
+            fi
+          done
+
+      # The folder tests/run.sh expects: the compiled plugins as in the
+      # source tree, their sources in sources/, SMJansson in deps/.
+      - name: Compile the self tests and the examples
+        run: |
+          spcomp=downloads/sourcemod/addons/sourcemod/scripting/spcomp64
+          mkdir -p work/deps/smjansson work/sources
+          cd smrunner
+          for sp in $(find tests examples -name '*.sp' | sort); do
+            out="$GITHUB_WORKSPACE/work/${sp%.sp}.smx"
+            mkdir -p "$(dirname "$out")"
+            "$GITHUB_WORKSPACE/$spcomp" \
+              -i "$GITHUB_WORKSPACE/downloads/sourcemod/addons/sourcemod/scripting/include" \
+              -i scripting/include \
+              -i "$GITHUB_WORKSPACE/downloads/smjansson/addons/sourcemod/scripting/include" \
+              -i "$GITHUB_WORKSPACE/downloads/steamworks/addons/sourcemod/scripting/include" \
+              "$sp" -o "$out" > "$GITHUB_WORKSPACE/spcomp.log" 2>&1 \
+              || { cat "$GITHUB_WORKSPACE/spcomp.log"; exit 1; }
+          done
+          cp -r tests examples "$GITHUB_WORKSPACE/work/sources/"
+          cp tests/run.sh "$GITHUB_WORKSPACE/work/run.sh"
+          cp -r "$GITHUB_WORKSPACE/downloads/smjansson/addons/sourcemod/extensions/." "$GITHUB_WORKSPACE/work/deps/smjansson/"
+
+      - name: Run the tests
+        run: |
+          sh work/run.sh "$GITHUB_WORKSPACE/stage/smrunner/bin/smrunner"
+          sh work/run.sh "$GITHUB_WORKSPACE/stage/smrunner/bin/smrunner64"
+
+      - name: Pack
+        run: |
+          label="${GITHUB_REF_NAME}"
+          [[ "$GITHUB_REF" == refs/tags/* ]] || label="${GITHUB_SHA::7}"
+          tar -czf "smrunner-$label-linux.tar.gz" -C stage smrunner
+          find stage -type f -not -path 'stage/smrunner/share/sourcemod/*' | sort
+          echo "stage/smrunner/share/sourcemod/: $(find stage/smrunner/share/sourcemod -type f | wc -l) files"
+
+      - name: Upload the archive
+        uses: actions/upload-artifact@v4
+        with:
+          name: smrunner-linux
+          path: smrunner-*-linux.tar.gz
+          if-no-files-found: error
+
+  release:
+    name: Release
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [linux]
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Check that the tag matches smrunner's version
+        run: |
+          tag="$GITHUB_REF_NAME"
+          version=$(sed -n 's/^#define SMRUNNER_VERSION "\(.*\)"$/\1/p' packages/runner/src/version.h)
+          if [ "$tag" != "v$version" ]; then
+            echo "::error::Tag $tag does not match version $version in packages/runner/src/version.h"
+            exit 1
+          fi
+          echo "Version $version matches tag $tag"
+
+      - name: Download the archive
+        uses: actions/download-artifact@v4
+        with:
+          path: archives
+          merge-multiple: true
+
+      - name: Publish the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" archives/* \
+            --repo "$GITHUB_REPOSITORY" \
+            --title "$GITHUB_REF_NAME" \
+            --generate-notes \
+            --verify-tag

@@ -1,0 +1,17 @@
+--- a/vm/smx-v1-image.cpp
++++ b/vm/smx-v1-image.cpp
+@@ -711,6 +711,14 @@
+ bool
+ SmxV1Image::validateDebugVariables(const smx_rtti_table_header* rtti_table)
+ {
++  // smrunner: the VM checks the debug variables only when debug breaks are
++  // on, and reads them for nothing else. spcomp 1.12 writes entries this
++  // check refuses (built-in constants such as cellmin as globals whose
++  // address is their value, types the RTTI reader does not know), which
++  // would refuse every plugin under a debugger. smrunner reads the tables
++  // itself and skips such entries, so the check is not made.
++  (void)rtti_table;
++  return true;
+   for (uint32_t i = 0; i < rtti_table->row_count; i++) {
+     const smx_rtti_debug_var* debug_var = getRttiRow<smx_rtti_debug_var>(rtti_table, i);
+     if (debug_var->vclass > kVarClass_Max)

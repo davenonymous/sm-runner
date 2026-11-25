@@ -1,0 +1,39 @@
+SMRUNNER LICENSE INFORMATION
+----------------------------
+
+smrunner is Copyright (C) 2026 davenonymous.
+
+smrunner is licensed under the same terms as SourceMod: the GNU General Public
+License, version 3, with the special exceptions below. The exceptions are worded
+as AlliedModders LLC grants them for SourceMod (SourceMod's LICENSE.txt, version
+2019-9-30); for the code of smrunner, its authors grant them.
+
+As a special exception, the smrunner authors give you permission to link the
+code of this program (as well as its derivative works) to "Half-Life 2," the
+"Source Engine" and any Game MODs that run on software by the Valve Corporation.
+You must obey the GNU General Public License in all respects for all other code
+used. Additionally, the smrunner authors grant this exception to all derivative
+works.
+
+As an additional special exception to the GNU General Public License 3.0, the
+smrunner authors permit dual-licensing of DERIVATIVE WORKS ONLY (that is,
+SourcePawn/SourceMod Plugins and SourceMod Extensions, or any software built
+from the smrunner include files) under the GNU General Public License version 2
+"or any higher version." As such, you may choose for your derivative work(s) to
+be compatible with the GNU General Public License version 2 as long as it is
+also compatible with the GNU General Public License version 3, via the "or any
+higher version" clause. This is intended for compatibility with other software.
+
+A copy of the GNU General Public License 2.0 is available in licenses/GPLv2.txt.
+A copy of the GNU General Public License 3.0 is available in licenses/GPLv3.txt.
+
+SOURCEMOD AND SOURCEPAWN
+------------------------
+
+smrunner builds and ships SourceMod's logic library (sourcemod.logic.so) and
+the SourcePawn VM (libsourcepawn.so) from SourceMod's sources, the VM with the
+changes in packages/patches/, and ships SourceMod's configs, gamedata,
+translations and cfg files. Parts of packages/runner/src/core/ are ported from
+SourceMod's core (each file says which). SourceMod and SourcePawn are Copyright (C) AlliedModders LLC,
+licensed under the GNU General Public License, version 3, with the exceptions
+of SourceMod's LICENSE.txt, which dist/licenses/sourcemod/ holds.

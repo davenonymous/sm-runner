@@ -1,0 +1,87 @@
+# vim: set sts=2 ts=8 sw=2 tw=99 et ft=python:
+# Copyright 2026 davenonymous
+#
+# Builds, for every target architecture:
+#   sourcemod.logic  SourceMod's own core/logic sources, unchanged, with the
+#                    flags SourceMod's AMBuildScript gives a library;
+#   smrunner         the runner: SourceMod's core side, mocked, around that
+#                    logic library and the SourcePawn VM (libsourcepawn.so);
+#   topmenus.ext     SourceMod's Top Menus extension, unchanged;
+#   SteamWorks.ext   the SteamWorks stand-in, with the vcpkg libraries of
+#                    --libs-path linked in.
+# The VM itself and zlib come from SourcePawn's own build (--sp-build).
+import os
+
+def Normalize(path):
+  return os.path.abspath(os.path.normpath(path))
+
+def RequiredPath(option, name):
+  path = getattr(builder.options, option)
+  if not path or not os.path.isdir(path):
+    raise Exception('--{} must name the {} folder'.format(option.replace('_', '-'), name))
+  return Normalize(path)
+
+class ProjectConfig(object):
+  def __init__(self):
+    self.sm_root = RequiredPath('sm_path', 'SourceMod')
+    self.mms_root = RequiredPath('mms_path', 'Metamod:Source')
+    self.sp_build = RequiredPath('sp_build', 'SourcePawn build')
+    self.libs_root = RequiredPath('libs_path', 'vcpkg libraries')
+    self.sp_root = os.path.join(self.sm_root, 'sourcepawn')
+    self.all_targets = []
+    for arch in builder.options.targets.split(','):
+      self.all_targets.append(builder.DetectCxx(target_arch = arch))
+    for cxx in self.all_targets:
+      self.configure_cxx(cxx)
+
+  # The flags of SourceMod's AMBuildScript for a Linux library built with
+  # clang (configure_cxx, configure_gcc, configure_linux, SetArchFlags).
+  def configure_cxx(self, cxx):
+    cxx.defines += [
+      'stricmp=strcasecmp', '_stricmp=strcasecmp', '_snprintf=snprintf', '_vsnprintf=vsnprintf',
+      'HAVE_STDINT_H', 'GNUC', 'LINUX', '_LINUX', 'POSIX', '_FILE_OFFSET_BITS=64', 'SOURCEMOD_BUILD',
+    ]
+    cxx.cflags += [
+      '-pipe', '-fno-strict-aliasing', '-Wall', '-Werror', '-Wno-unused', '-Wno-switch',
+      '-Wno-array-bounds', '-Wno-unknown-pragmas', '-Wno-dangling-else', '-fvisibility=hidden',
+      '-msse', '-Wno-narrowing', '-Wno-sometimes-uninitialized', '-Wno-implicit-int-float-conversion',
+      '-Wno-tautological-overlap-compare', '-fno-omit-frame-pointer', '-fPIC',
+    ]
+    cxx.cxxflags += [
+      '-std=c++17', '-fno-threadsafe-statics', '-Wno-non-virtual-dtor', '-Wno-overloaded-virtual',
+      '-Wno-register', '-fvisibility-inlines-hidden', '-Wno-expansion-to-defined',
+      '-Wno-inconsistent-missing-override', '-Wno-null-dereference', '-Wno-delete-non-virtual-dtor',
+      '-Wno-implicit-exception-spec-mismatch', '-Wno-deprecated-register',
+    ]
+    if cxx.target.arch == 'x86':
+      cxx.cflags += ['-msse2', '-mfpmath=sse']
+    if builder.options.opt == '1':
+      cxx.defines += ['NDEBUG']
+      cxx.cflags += ['-O2']
+    if builder.options.debug == '1':
+      cxx.cflags += ['-g3']
+    cxx.linkflags += ['-lm', '-lgcc_eh', '-static-libstdc++']
+
+  def sm_includes(self):
+    return [
+      os.path.join(self.sm_root, 'public'),
+      os.path.join(self.sm_root, 'public', 'extensions'),
+      os.path.join(self.sm_root, 'sourcepawn', 'include'),
+      os.path.join(self.sm_root, 'public', 'amtl', 'amtl'),
+      os.path.join(self.sm_root, 'public', 'amtl'),
+      os.path.join(self.mms_root, 'core', 'sourcehook'),
+    ]
+
+  # The vcpkg install of one architecture (x86 or x64 below --libs-path).
+  def libs_dir(self, arch):
+    return os.path.join(self.libs_root, 'x64' if arch == 'x86_64' else 'x86')
+
+  def sp_static_library(self, arch, *parts):
+    return os.path.join(self.sp_build, *parts[:-1], 'linux-' + arch, parts[-1])
+
+Project = ProjectConfig()
+
+builder.targets = builder.CloneableList(Project.all_targets)
+builder.Build(['packages/logic/AMBuilder', 'packages/runner/AMBuilder', 'packages/topmenus/AMBuilder',
+               'packages/steamworks/AMBuilder'],
+              {'Project': Project})

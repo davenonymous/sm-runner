@@ -1,0 +1,46 @@
+# vim: set sts=2 ts=8 sw=2 tw=99 et ft=python:
+# Copyright 2026 davenonymous
+#
+# smrunner's SteamWorks stand-in (SteamWorks.ext.so), for every target
+# architecture: src/ against SourceMod's extension headers and the runner's
+# ISMRunnerHost, with libcurl, Mbed TLS, zlib and nlohmann/json from vcpkg
+# (--libs-path) linked in statically, and the runner's checked plugin
+# memory (packages/runner/src/testing/plugin_memory.cpp), compiled in so
+# that both check plugin memory with one set of rules. Only SourceMod's entry point is
+# exported.
+import os
+
+source_root = os.path.join(builder.currentSourcePath, 'src')
+
+for cxx in builder.targets:
+  binary = cxx.Library('SteamWorks.ext')
+  compiler = binary.compiler
+  libs = Project.libs_dir(cxx.target.arch)
+  compiler.cxxincludes += [
+    builder.currentSourcePath,
+    source_root,
+    os.path.join(builder.sourcePath, 'packages', 'runner', 'public'),
+    os.path.join(builder.sourcePath, 'packages', 'runner', 'src'),
+    os.path.join(libs, 'include'),
+  ] + Project.sm_includes()
+  compiler.defines += ['CURL_STATICLIB']
+  # The passthrough worker is a thread of its own: function statics must be
+  # initialized thread-safely, unlike in the rest of the build.
+  compiler.cxxflags = [flag for flag in compiler.cxxflags if flag != '-fno-threadsafe-statics']
+  compiler.cxxflags += ['-Wno-unused-parameter']
+  compiler.linkflags += [
+    '-lpthread',
+    '-Wl,--exclude-libs,ALL',
+    '-Wl,--version-script=' + os.path.join(builder.currentSourcePath, 'exports.map'),
+    '-Wl,--no-undefined',
+  ]
+  compiler.postlink += [os.path.join(libs, 'lib', name) for name in [
+    'libcurl.a', 'libmbedtls.a', 'libmbedx509.a', 'libmbedcrypto.a', 'libeverest.a', 'libp256m.a', 'libz.a',
+  ]]
+  binary.sources += sorted(os.path.join(source_root, name) for name in os.listdir(source_root) if name.endswith('.cpp'))
+  binary.sources += [
+    os.path.join(builder.sourcePath, 'packages', 'runner', 'src', 'testing', 'plugin_memory.cpp'),
+    os.path.join(Project.sm_root, 'public', 'smsdk_ext.cpp'),
+    os.path.join(Project.sm_root, 'public', 'amtl', 'compat', 'stdcxx.cpp'),
+  ]
+  builder.Add(binary)
