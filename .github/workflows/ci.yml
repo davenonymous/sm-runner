@@ -78,8 +78,10 @@ jobs:
         with:
           python-version: '3.12'
 
+      # SourcePawn's configure.py imports pkg_resources, which Python 3.12
+      # no longer ships and setuptools 81 and later no longer provide.
       - name: Install AMBuild
-        run: pip install "git+https://github.com/alliedmodders/ambuild@${AMBUILD_COMMIT}"
+        run: pip install "setuptools<81" "git+https://github.com/alliedmodders/ambuild@${AMBUILD_COMMIT}"
 
       # libcurl with Mbed TLS and nlohmann/json, static and
       # position-independent for x86 and x64, from vcpkg at the commit
