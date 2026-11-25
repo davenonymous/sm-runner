@@ -1,33 +1,42 @@
 /**
  * Copyright 2026 davenonymous
  *
- * The test API of smrunner, which runs SourceMod plugins on a simulated
- * server: SourceMod's own logic library and VM with a mocked core, no game.
+ * smrunner's test API. smrunner runs SourceMod plugins on a simulated
+ * server: SourceMod's own logic library and VM on a mocked core, without a
+ * game. Documentation: docs/api-reference.md and docs/writing-tests.md.
  *
  * A test plugin includes this file and declares tests: public functions
- * without parameters whose names start with "Test_". smrunner runs each test
- * on a server of its own, in a process of its own: the test plugin and the
- * plugins under test load (the test plugin first), the map starts and its
- * configs are executed (OnConfigsExecuted has fired), then the test function
- * is called. Inside it the test drives the server (frames, time, commands,
- * clients) and checks what happened with the Assert methods. A test passes
- * when it returns without a failed assertion, without an unexpected plugin
- * error and with every expected error seen.
+ * without parameters whose names start with "Test_". Each test runs on a
+ * fresh server, in a process of its own:
+ *
+ *   1. the test plugin loads, then the plugins under test (--plugin);
+ *   2. the map starts and its configs are executed (OnConfigsExecuted has
+ *      fired);
+ *   3. the test function runs: it drives the server (frames, commands,
+ *      clients, menus) and checks what happened with the Assert methods.
+ *
+ * A test passes when it returns without a failed assertion, without an
+ * unexpected plugin error, and with every expected error seen.
  *
  * A test plugin may define
+ *
  *     public void OnTestBoot(const char[] test)
- * which smrunner calls with the test's name right after the test plugin was
- * loaded, before any plugin's OnPluginStart: the place to install mocks,
- * write files the plugins read or set engine cvars.
  *
- *     smrunner test my-tests.smx --plugin my-plugin.smx --extensions dist/extensions
+ * smrunner calls it with the test's name once every plugin is loaded
+ * (AskPluginLoad2 has run), before any OnPluginStart and OnMapStart: the place to install
+ * mocks, set breakpoints, write files or set cvars the plugins under test
+ * need when they start.
  *
- * Everything here works on the simulated server only. In run mode
- * (smrunner run) there is no test: the natives that drive the server, its
- * clients and the plugins' variables work as in a test, a failed assertion
- * fails the run, and the natives that need a test (ExpectError, Skip,
- * GetTestName, the native hooks and mocks and the breakpoints) throw a
- * native error.
+ *     smrunner test my-tests.smx --plugin my-plugin.smx
+ *
+ * In run mode (smrunner run) there is no test. The natives that drive the
+ * server, its clients and menus and the plugins' variables work as in a
+ * test, and a failed assertion fails the run. The natives marked "Needs a
+ * test" throw a native error there.
+ *
+ * Natives marked "Not inside a frame" throw a native error when called from
+ * a timer, RequestFrame, OnGameFrame, a frame hook, a command run from the
+ * command buffer, or a breakpoint or hook reached from one of these.
  */
 
 #if defined _smrunner_included
@@ -37,21 +46,22 @@
 
 
 
-/* What a simulated client received. */
+/* The kind of a message a simulated client received. */
 enum RunnerMessage {
-	RunnerMessage_Console = 0,  // its console (PrintToConsole, replies)
-	RunnerMessage_Chat,         // chat (PrintToChat, replies to chat triggers)
+	RunnerMessage_Console = 0,  // its console: PrintToConsole, ReplyToCommand, "Unknown command" answers
+	RunnerMessage_Chat,         // chat: PrintToChat, SayText, SayText2
 	RunnerMessage_Center,       // PrintCenterText
 	RunnerMessage_Hint,         // PrintHintText
-	RunnerMessage_Command,      // a command sent to it (ClientCommand, replicated cvars)
+	RunnerMessage_Command,      // a command sent to it: ClientCommand, replicated cvars
 	RunnerMessage_Kick,         // the reason it was kicked with
-	RunnerMessage_Menu,         // a menu or panel display (its text as the client shows it)
-	RunnerMessage_UserMessage,  // the name of a user message that carries no text
-	RunnerMessage_Any = -1      // any of them
+	RunnerMessage_Menu,         // a menu or panel display, its text as the client shows it
+	RunnerMessage_UserMessage,  // the name of a user message without text
+	RunnerMessage_Any = -1      // any kind, as a filter
 };
 
-/* One call of a hooked or mocked native; valid only inside the hook or mock
- * callback it was given to. Arguments count from 1. */
+/* One call of a hooked or mocked native. Valid only while the hook or mock
+ * callback it was given to runs; using it later is a native error.
+ * Arguments count from 1, as in the native's declaration. */
 methodmap RunnerCall {
 	// The number of arguments the plugin passed.
 	property int ArgCount {
@@ -63,49 +73,59 @@ methodmap RunnerCall {
 		public native get();
 	}
 
-	// What the call returns: in a post hook the native's result, which the
-	// hook may change; in a pre hook that handles the call, what it returns.
+	// What the call returns. In a post hook: the native's result, which the
+	// hook may change. In a pre hook that handles the call: what the call
+	// returns (0 unless set).
 	property any Result {
 		public native get();
 		public native set(any value);
 	}
 
+	// The native's name.
 	public native void GetName(char[] buffer, int maxlength);
 
-	// The argument as passed (a cell; for arrays and references their
-	// address in the caller).
+	// Argument n as passed: a cell, or for arrays and references their
+	// address in the caller.
 	public native any Arg(int n);
 
-	// Changes an argument for the native (pre hooks and CallOriginal).
+	// Changes argument n for the real native (in a pre hook, or before
+	// CallOriginal in a mock).
 	public native void SetArg(int n, any value);
 
-	// A by-reference argument (int &value, float &value).
+	// The value a by-reference argument (int &value, float &value) refers
+	// to, and writing it.
 	public native any ArgRef(int n);
 	public native void SetArgRef(int n, any value);
 
-	// A string argument.
+	// Copies string argument n; returns the bytes written.
 	public native int GetArgString(int n, char[] buffer, int maxlength);
 
-	// Writes a string into the caller's buffer that argument n names; it
-	// must hold maxlength bytes, usually the next argument says how many.
+	// Writes value into the caller's string buffer that argument n names.
+	// The buffer must hold maxlength bytes; usually the native's next
+	// argument says how many (Arg(n + 1)).
 	public native void SetArgString(int n, const char[] value, int maxlength);
 
-	// An array argument.
+	// Copies size cells of array argument n into values, or from values.
 	public native void GetArgArray(int n, any[] values, int size);
 	public native void SetArgArray(int n, const any[] values, int size);
 
-	// Runs the real native with the (possibly changed) arguments, from a mock.
+	// From a mock: runs the real native with the arguments as they are now
+	// and returns its result. When the real native throws, returns 0 and the
+	// error reaches the calling plugin.
 	public native any CallOriginal();
 }
 
-/* A plugin stopped at a breakpoint; valid only inside the callback.
- * Variables are looked up by name: the function's locals and arguments
- * visible at the statement first, then the plugin's globals. */
+/* A plugin stopped at a breakpoint. Valid only while the breakpoint's
+ * callback runs. Variables are looked up by name as the plugin sees them
+ * at the statement: the function's locals and arguments first, then the
+ * plugin's globals. */
 methodmap Breakpoint {
+	// The breakpoint's id, as BreakAtLine or BreakAtFunction returned it.
 	property int Id {
 		public native get();
 	}
 
+	// The line the plugin stopped at.
 	property int Line {
 		public native get();
 	}
@@ -115,34 +135,40 @@ methodmap Breakpoint {
 		public native get();
 	}
 
+	// The source file (as compiled) and the function the plugin stopped in.
 	public native void GetFile(char[] buffer, int maxlength);
 	public native void GetFunction(char[] buffer, int maxlength);
 
+	// Whether a variable of that name is visible at the statement.
 	public native bool HasVariable(const char[] name);
 
-	// A variable's cell, or one cell of an array variable.
+	// A cell variable (int, float, bool, handle, enum), or cell index of a
+	// one-dimensional array. An unknown name or an index out of bounds is a
+	// native error. The plugin sees a change when it goes on.
 	public native any GetValue(const char[] name, int index = 0);
 	public native void SetValue(const char[] name, any value, int index = 0);
 
-	// A string (char array) variable.
+	// A string (char array) variable. SetString cuts text that does not fit.
 	public native int GetString(const char[] name, char[] buffer, int maxlength);
 	public native void SetString(const char[] name, const char[] value);
 }
 
-/* Runner.WaitUntil's condition. */
+/* The condition of Runner.WaitUntil; data is WaitUntil's data. */
 typeset RunnerCondition {
 	function bool (any data);
 	function bool ();
 };
 
-/* A native hook: Plugin_Handled or more skips the native and makes the call
- * return call.Result; a post hook's return value is ignored. */
+/* A pre or post hook of Runner.HookNative. A pre hook that returns
+ * Plugin_Handled or more skips the native, and the call returns
+ * call.Result. A post hook's return value is ignored. */
 typeset RunnerNativeHook {
 	function Action (RunnerCall call);
 	function void (RunnerCall call);
 };
 
-/* A mock: replaces the native; its return value is the native's. */
+/* A mock of Runner.MockNative: replaces the native; its return value is the
+ * native's result. */
 typeset RunnerNativeMock {
 	function any (RunnerCall call);
 };
@@ -156,33 +182,36 @@ typeset RunnerBreakpoint {
 methodmap Runner {
 	/* ----------------------------------------------------------- time */
 
-	// Runs that many server frames (one tick each).
+	// Runs count server frames, one tick each. Not inside a frame.
 	public static native void Frames(int count);
 
-	// Runs frames for that much game time.
+	// Runs frames for that much game time, rounded up to whole frames. Not
+	// inside a frame.
 	public static native void Seconds(float seconds);
 
-	// Runs frames until condition returns true, with a millisecond of real
-	// time between frames, for extensions that work on threads. Returns false
-	// when timeout (real seconds) passed first.
+	// Runs frames, with a millisecond of real time between them, until
+	// condition returns true; for extensions that work on threads. Returns
+	// false when timeout real seconds passed first or the server quit. Not
+	// inside a frame.
 	public static native bool WaitUntil(RunnerCondition condition, float timeout = 5.0, any data = 0);
 
 	/* --------------------------------------------------------- server */
 
-	// Runs server commands now, before it returns, apart from the command
-	// buffer: the commands of the line and what they add while they run
-	// (exec'd files, ServerCommand) run at once, up to a "wait" of their
-	// own, after which the rest runs when the buffer runs next (the next
-	// frame or ServerExecute). Commands buffered before and their waits are
-	// left as they are.
+	// Runs server commands now, before it returns, outside of the command
+	// buffer. What the commands add while they run (an exec'd file,
+	// ServerCommand) runs at once too, up to a "wait"; what comes after a
+	// wait runs when the buffer runs next (the next frame or
+	// ServerExecute). Commands buffered before are left as they are.
 	public static native void Command(const char[] format, any ...);
 
-	// Runs server commands now as Command does and returns what they
-	// printed.
+	// Runs server commands as Command does and writes what they printed
+	// into output. Returns the bytes written.
 	public static native int CommandOutput(char[] output, int maxlength, const char[] format, any ...);
 
-	// Changes the map now: OnMapEnd, plugins reload as on a real map change,
-	// OnMapStart and the configs.
+	// Changes the map now: OnMapEnd, SourceMod's plugin refresh, OnMapStart
+	// and the new map's configs. Returns once OnConfigsExecuted ran. Every
+	// client disconnects; the game clock starts again at 0. Not inside a
+	// frame.
 	public static native void ChangeMap(const char[] map);
 
 	/* -------------------------------------------------------- console */
@@ -191,80 +220,89 @@ methodmap Runner {
 	// the last ClearConsole().
 	public static native bool ConsoleContains(const char[] text);
 
-	// What the server console printed since the server started or the last
-	// ClearConsole() (the end of it when it does not fit); returns the
-	// number of bytes written.
+	// Copies what the server console printed since the server started or
+	// the last ClearConsole(); the end of it when it does not fit. Returns
+	// the bytes written.
 	public static native int GetConsole(char[] buffer, int maxlength);
 
+	// Forgets what the console printed so far.
 	public static native void ClearConsole();
 
 	/* -------------------------------------------------------- clients */
 
-	// Connects a client and puts it in the server. steamId is empty (one is
-	// made up), "STEAM_0:1:23", "[U:1:47]" or a 64-bit id. With authorize the
-	// call returns after OnClientAuthorized and OnClientPostAdminCheck.
-	// Returns the client index, or 0 when a plugin rejected the client
-	// (Runner.GetRejectReason tells why) or the server is full. ip is the
-	// address with its port (GetClientIP), fewer than 64 characters.
+	// Connects a client through SourceMod's connect sequence and returns its
+	// index. steamId is "" (a unique one is made up), a Steam2 id
+	// ("STEAM_0:1:23"), a Steam3 id ("[U:1:47]") or a 64-bit id. With authorize, returns after
+	// OnClientAuthorized and OnClientPostAdminCheck (then not inside a
+	// frame); without, after OnClientPutInServer. ip is the address with its
+	// port (GetClientIP), fewer than 64 characters. Returns 0 when a plugin
+	// rejected the client, the server is full or the client was kicked
+	// while connecting; GetRejectReason tells why.
 	public static native int ConnectClient(const char[] name, const char[] steamId = "", bool authorize = true, const char[] ip = "127.0.0.1:27005");
 
-	// Connects a bot (a fake client), like CreateFakeClient.
+	// Connects a bot, as CreateFakeClient does. Returns its index or 0.
 	public static native int ConnectBot(const char[] name);
 
+	// Why the last ConnectClient or ConnectBot that returned 0 failed.
 	public static native int GetRejectReason(char[] buffer, int maxlength);
 
+	// Disconnects a client.
 	public static native void Disconnect(int client, const char[] reason = "Disconnect by user.");
 
-	// Runs a console command as typed by the client. A command of 511
-	// characters or more is a native error: the client's own command buffer
-	// refuses it. So is a "wait" while sv_allow_wait_command allows waits:
-	// the client would send what follows in later frames of its own, which
-	// simulated clients do not have.
+	// Runs a console command as typed by the client: split at ';' and line
+	// breaks outside quotes and // comments. Unknown commands get TF2's
+	// "Unknown command: <name>" in the client's console. A command of 511
+	// characters or more is a native error, as the client's own command
+	// buffer refuses it. So is a "wait" while sv_allow_wait_command allows
+	// waits: a client would send what follows in later frames of its own,
+	// which simulated clients do not have.
 	public static native void ClientCommand(int client, const char[] format, any ...);
 
-	// Sets one of the client's own cvars, its userinfo: GetClientInfo reads
+	// Sets one of the client's own cvars, its userinfo. GetClientInfo reads
 	// the new value at once; the server takes the change on the next frame,
 	// as the engine does (OnClientSettingsChanged, a name change, the admin
 	// checks for a new password). QueryClientConVar is not simulated.
 	public static native void SetClientConVar(int client, const char[] name, const char[] value);
 
+	// Set what GetClientTeam, IsPlayerAlive and GetClientHealth return.
 	public static native void SetClientTeam(int client, int team);
 	public static native void SetClientAlive(int client, bool alive);
 	public static native void SetClientHealth(int client, int health);
 
-	// Whether the client received a message of the kind that contains text,
-	// as it was sent or without its chat color codes.
+	// Whether the client received a message of the kind that contains text
+	// (case-sensitive), as it was sent or without its chat color codes.
 	public static native bool ClientReceived(int client, RunnerMessage kind, const char[] text);
 
 	// How many messages of the kind the client received.
 	public static native int ClientMessageCount(int client, RunnerMessage kind = RunnerMessage_Any);
 
-	// The index-th message (from 0) of any kind; returns its kind, or -1
-	// when there is no such message.
+	// Copies the index-th message (from 0, of any kind) as it was sent;
+	// returns its kind, or -1 when there is no such message.
 	public static native RunnerMessage GetClientMessage(int client, int index, char[] buffer, int maxlength);
 
+	// Forgets the client's messages so far.
 	public static native void ClearClientMessages(int client);
 
 	/* ---------------------------------------------------------- menus */
 
-	// The radio menu on the client's screen: its text as the client shows it
-	// ("->1. Item" for a key it takes). False, with an empty buffer, when the
-	// client shows none: never shown, closed by a key it takes, or its hold
-	// time ran out.
+	// Copies the radio menu on the client's screen, its text as the client
+	// shows it ("->1. Item" for a key it takes, "1. Item" for a disabled
+	// item). False, with an empty buffer, when the client shows none: never
+	// shown, closed by a key it takes, replaced, or its time ran out.
 	public static native bool GetClientMenu(int client, char[] buffer, int maxlength);
 
-	// The keys the menu on the client's screen takes, bit 0 for key 1 to bit
-	// 9 for key 0; 0 when it shows none.
+	// The keys the menu on the client's screen takes: bit 0 for key 1 to
+	// bit 8 for key 9, bit 9 for key 0. 0 when it shows none.
 	public static native int ClientMenuKeys(int client);
 
 	// Draws the menu the client shows in a box (keys it takes green, its
-	// navigation cyan, disabled lines dim) for people to read: printed under
-	// the test's line in the report, or on standard output in run mode.
-	// Colors follow smrunner's --color.
+	// navigation cyan, disabled lines dim) for people to read: below the
+	// test's line in the report, or on standard output in run mode. Colors
+	// follow smrunner's --color.
 	public static native void PrintClientMenu(int client);
 
 	// The client presses a menu key: "menuselect <key>" as the client sends
-	// it (1 to 9, and 10 for the key 0). With no menu on the screen the
+	// it, 1 to 9, and 10 for the key 0. With no menu on the screen the
 	// command goes on as any other client command.
 	public static native void SelectMenu(int client, int key);
 
@@ -275,74 +313,81 @@ methodmap Runner {
 
 	/* --------------------------------------------------------- the test */
 
-	// These need a test: in run mode they throw a native error.
-
-	// The test fails unless a plugin error containing text occurs, and an
-	// error that contains it does not fail the test. Each call expects one
-	// error.
+	// Needs a test. Expects one plugin error whose "<plugin file>: <message>"
+	// contains text: that error does not fail the test, and the test fails
+	// when no such error occurs. Call it once per expected error.
 	public static native void ExpectError(const char[] text);
 
-	// Ends the test as skipped.
+	// Needs a test. Marks the test as skipped and stops the running function
+	// of the test plugin (from a callback: only that callback). A test with
+	// a failure is reported as failed.
 	public static native void Skip(const char[] reason, any ...);
 
+	// Needs a test. Copies the running test's name.
 	public static native int GetTestName(char[] buffer, int maxlength);
 
 	/* -------------------------------------------------------- natives */
 
-	// Hooks and mocks need a test: in run mode they throw a native error.
-
-	// Replaces a native in every plugin that is not a test plugin.
+	// Needs a test. Replaces a native in every plugin under test, also in
+	// plugins loaded later; test plugins keep the real one. Replaces earlier
+	// hooks and mocks of the native.
 	public static native void MockNative(const char[] name, RunnerNativeMock mock);
 
-	// Hooks a native in every plugin that is not a test plugin; pre runs
-	// before the native, post after it (both may be INVALID_FUNCTION).
+	// Needs a test. Hooks a native in every plugin under test, also in
+	// plugins loaded later; test plugins keep the real one. pre runs before
+	// the native, post after it (also when pre handled the call, but not
+	// when the native threw); either may be INVALID_FUNCTION, not both. Replaces earlier hooks and mocks of
+	// the native. A name no plugin under test uses does nothing.
 	public static native void HookNative(const char[] name, RunnerNativeHook pre, RunnerNativeHook post = INVALID_FUNCTION);
 
-	// Removes a mock or the hooks of a native.
+	// Needs a test. Removes the mock or the hooks of a native.
 	public static native void UnhookNative(const char[] name);
 
-	// How often plugins that are not test plugins called a hooked or mocked
-	// native.
+	// Needs a test. How often plugins under test called a hooked or mocked
+	// native. The count stays after UnhookNative, and the calls of the
+	// plugins loaded then are no longer counted.
 	public static native int NativeCalls(const char[] name);
 
 	/* ---------------------------------------------------- breakpoints */
 
-	// Breakpoints need a test: in run mode they throw a native error.
-
-	// Stops at the first statement at or after line of file (a name or the
-	// end of a path, as the plugin was compiled), in every plugin that is
-	// not a test plugin, or in the named one. Returns the breakpoint's id;
-	// fails the test when no loaded plugin has such a statement.
+	// Needs a test. Stops at the first statement at or after line of file
+	// (the source file's name or the end of its path, as compiled), in every
+	// plugin under test, or only in the plugin named by its file name.
+	// Returns the breakpoint's id; fails the test when no loaded plugin under
+	// test has such a statement.
 	public static native int BreakAtLine(const char[] file, int line, RunnerBreakpoint callback, any data = 0, const char[] plugin = "");
 
-	// Stops at the first statement of a function, in every plugin that is
-	// not a test plugin, or in the named one. Returns the breakpoint's id;
-	// fails the test when no loaded plugin has a function of that name with
-	// a statement.
+	// Needs a test. Stops each time a plugin under test (or only the named
+	// one) enters the function, before its first statement. Returns the
+	// breakpoint's id; fails the test when no loaded plugin under test has a
+	// function of that name.
 	public static native int BreakAtFunction(const char[] functionName, RunnerBreakpoint callback, any data = 0, const char[] plugin = "");
 
+	// Needs a test. Removes a breakpoint; an unknown id is a native error.
 	public static native void RemoveBreakpoint(int id);
 
-	// How often the breakpoint was reached.
+	// Needs a test. How often plugins reached the breakpoint.
 	public static native int BreakpointHits(int id);
 
 	/* ------------------------------------------- variables of plugins */
 
-	// A global variable of a plugin (a cell: int, float, bool, handle), or
-	// one cell of a global array.
+	// A global variable of any plugin, at any time: a cell (int, float,
+	// bool, handle), or one cell of a global array.
 	public static native any GetPluginValue(Handle plugin, const char[] name, int index = 0);
 	public static native void SetPluginValue(Handle plugin, const char[] name, any value, int index = 0);
 
-	// A global string (char array) of a plugin.
+	// A global string (char array) of a plugin. SetPluginString cuts text
+	// that does not fit.
 	public static native int GetPluginString(Handle plugin, const char[] name, char[] buffer, int maxlength);
 	public static native void SetPluginString(Handle plugin, const char[] name, const char[] value);
 }
 
 /* ---------------------------------------------------------------------
- * Assertions. A failed assertion records the failure with the test plugin's
- * file and line and stops the running function of the test plugin (with an
- * error that smrunner does not report as a plugin error). The message and
- * its arguments are formatted like Format().
+ * Assertions. A failed assertion records the failure with the test
+ * plugin's file and line, then stops the running function of the test
+ * plugin: the test function, or the callback (timer, hook, mock,
+ * breakpoint) it failed in. The message and its arguments are formatted
+ * like Format().
  */
 methodmap Assert {
 	// Fails unless condition is true.
@@ -363,14 +408,15 @@ methodmap Assert {
 	// Fails unless the strings are equal, case-sensitively.
 	public static native void StrEqual(const char[] actual, const char[] expected, const char[] message = "", any ...);
 
-	// Fails unless text contains part.
+	// Fails unless text contains part, case-sensitively.
 	public static native void StrContains(const char[] text, const char[] part, const char[] message = "", any ...);
 
 	// Fails unless the server console printed text since the server started
 	// or the last Runner.ClearConsole().
 	public static native void ConsoleContains(const char[] text, const char[] message = "", any ...);
 
-	// Fails when the server console printed text.
+	// Fails when the server console printed text since the server started
+	// or the last Runner.ClearConsole().
 	public static native void ConsoleNotContains(const char[] text, const char[] message = "", any ...);
 
 	// Fails unless the client received a message of the kind that contains

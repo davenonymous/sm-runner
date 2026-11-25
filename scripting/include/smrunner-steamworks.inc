@@ -1,20 +1,26 @@
 // Copyright 2026 davenonymous
 //
-// smrunner's test API for SteamWorks: the routes that answer a test's HTTP
-// requests, the requests the plugins sent, and the game server's and its
-// clients' Steam state, for test plugins run with --steamworks. Its natives
-// come from smrunner's SteamWorks stand-in extension, which this include
-// requires; include SteamWorks.inc (SteamWorks 1.2.167) first or let this
-// include do it.
+// smrunner's test API for its SteamWorks stand-in: routes that answer the
+// HTTP requests of a test, the log of the requests the plugins sent, and
+// the Steam state of the game server and its clients. Documentation:
+// docs/steamworks.md and docs/steamworks-api-reference.md.
 //
-// Answers: a request is answered by the newest route of the test that
-// matches it, else by the first entry of the mapping file
-// (--steamworks DIR: DIR/steamworks.json), else over the network when its
-// host is allowed (--steamworks-passthrough HOST or AllowPassthrough), else
-// with 404 and a console line naming it. Over the network, a redirect is
-// followed only to an allowed host; one to another host fails the request
-// (not successful) with a console line naming it, and nothing is recorded.
-// A URL pattern matches the request's URL exactly, query parameters in any
+// The natives come from the stand-in extension, which this include
+// requires: a test plugin that includes it needs --steamworks, or it fails
+// to load. This include includes SteamWorks.inc (SteamWorks 1.2.167), which
+// smrunner does not ship.
+//
+// A request is answered by the first of:
+//   1. the newest route of the test that matches it;
+//   2. the first matching entry of the mapping file (--steamworks DIR:
+//      DIR/steamworks.json);
+//   3. the network, when its host is allowed (--steamworks-passthrough HOST
+//      or AllowPassthrough); a redirect is followed only to an allowed
+//      host, one to another host fails the request (not successful) with a
+//      console line naming it, and nothing is recorded;
+//   4. 404 with an empty body and a console line naming the request.
+//
+// A URL pattern matches the request's whole URL, query parameters in any
 // order, '*' matching any characters. Faked answers arrive on the frame
 // after Send(), plus their delay frames.
 
@@ -120,6 +126,7 @@ methodmap RunnerSteam {
 	// What SteamWorks_IsConnected answers, without a forward.
 	public static native void SetConnected(bool connected);
 	// SteamWorks_SteamServersConnected; the server is connected afterwards.
+	// (The stand-in also fires it once, on the first frame of the first map.)
 	public static native void FireServersConnected();
 	// SteamWorks_SteamServersConnectFailure; not connected afterwards.
 	public static native void FireServersConnectFailure(EResult result);
