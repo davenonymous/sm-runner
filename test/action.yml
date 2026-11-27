@@ -1,0 +1,154 @@
+# Copyright 2026 davenonymous
+#
+# Runs smrunner's tests of SourceMod plugins: compiles .sp files, runs
+# `smrunner test` with smrunner, smrunner64 or both, and reports the results
+# as a job summary, annotations, outputs and optionally an artifact. Installs
+# smrunner itself when no setup step ran before. See docs/github-actions.md.
+
+name: Test SourceMod plugins with smrunner
+description: Compiles and tests SourceMod plugins on smrunner's simulated server, with a job summary and annotations.
+author: davenonymous
+branding:
+  icon: check-circle
+  color: orange
+
+inputs:
+  tests:
+    description: The test plugins (.sp or .smx), one path or glob per line, relative to working-directory.
+    required: true
+  plugins:
+    description: >-
+      The plugins under test (.sp or .smx), one path or glob per line, loaded in this order. A line
+      that matches no file is passed to --plugin as it is, for SourceMod's stock plugins (adminmenu).
+    default: ''
+  runner:
+    description: smrunner (32-bit), smrunner64 (64-bit) or both.
+    default: both
+  working-directory:
+    description: The folder that the paths and globs of every input are relative to.
+    default: '.'
+  include-paths:
+    description: Further include folders for compiling .sp files, one per line.
+    default: ''
+  extensions:
+    description: Extension folders for --extensions, one per line.
+    default: ''
+  extension:
+    description: Extension files for --extension, one per line.
+    default: ''
+  cvars:
+    description: NAME=VALUE for --cvar, one per line.
+    default: ''
+  files:
+    description: SRC=DEST for --file, one per line.
+    default: ''
+  core:
+    description: KEY=VALUE for --core, one per line.
+    default: ''
+  filter:
+    description: Runs only the tests whose name contains this text (--filter).
+    default: ''
+  timeout:
+    description: The real-time limit of each test in seconds (--timeout).
+    default: ''
+  steamworks:
+    description: true loads the SteamWorks stand-in (--steamworks); a folder also answers from its steamworks.json.
+    default: ''
+  steamworks-passthrough:
+    description: Hosts for --steamworks-passthrough, one per line. Needs steamworks.
+    default: ''
+  args:
+    description: Further arguments for smrunner test, one argument per line.
+    default: ''
+  annotations:
+    description: Report each failure as an error annotation, at its source line when it can be found.
+    default: 'true'
+  upload:
+    description: Upload the JUnit reports, the printed reports and the compiled plugins as an artifact.
+    default: 'false'
+  artifact-name:
+    description: 'The name of the artifact. Default: smrunner-results-<job>-<random suffix>.'
+    default: ''
+  version:
+    description: The smrunner release to install when no setup step ran before (see the setup action).
+    default: ''
+
+outputs:
+  junit:
+    description: The JUnit XML reports, one path per line (one per runner).
+    value: ${{ steps.run.outputs.junit }}
+  tests:
+    description: The number of tests, summed over the runners.
+    value: ${{ steps.run.outputs.tests }}
+  passed:
+    description: The number of passed tests, summed over the runners.
+    value: ${{ steps.run.outputs.passed }}
+  failed:
+    description: The number of failed, timed out and crashed tests, summed over the runners.
+    value: ${{ steps.run.outputs.failed }}
+  skipped:
+    description: The number of skipped tests, summed over the runners.
+    value: ${{ steps.run.outputs.skipped }}
+  result:
+    description: success when every runner passed, otherwise failure.
+    value: ${{ steps.run.outputs.result }}
+  artifact-name:
+    description: The name of the uploaded artifact; empty without upload.
+    value: ${{ inputs.upload == 'true' && steps.plan.outputs.artifact-name || '' }}
+
+runs:
+  using: composite
+  steps:
+    - name: Plan the test run
+      id: plan
+      shell: bash
+      run: python3 -I "${{ github.action_path }}/run.py" plan
+      env:
+        INPUT_TESTS: ${{ inputs.tests }}
+        INPUT_PLUGINS: ${{ inputs.plugins }}
+        INPUT_RUNNER: ${{ inputs.runner }}
+        INPUT_WORKING_DIRECTORY: ${{ inputs.working-directory }}
+        INPUT_INCLUDE_PATHS: ${{ inputs.include-paths }}
+        INPUT_EXTENSIONS: ${{ inputs.extensions }}
+        INPUT_EXTENSION: ${{ inputs.extension }}
+        INPUT_CVARS: ${{ inputs.cvars }}
+        INPUT_FILES: ${{ inputs.files }}
+        INPUT_CORE: ${{ inputs.core }}
+        INPUT_FILTER: ${{ inputs.filter }}
+        INPUT_TIMEOUT: ${{ inputs.timeout }}
+        INPUT_STEAMWORKS: ${{ inputs.steamworks }}
+        INPUT_STEAMWORKS_PASSTHROUGH: ${{ inputs.steamworks-passthrough }}
+        INPUT_ARGS: ${{ inputs.args }}
+        INPUT_ANNOTATIONS: ${{ inputs.annotations }}
+        INPUT_ARTIFACT_NAME: ${{ inputs.artifact-name }}
+
+    - name: Install smrunner
+      if: steps.plan.outputs.needs-setup == 'true'
+      shell: bash
+      run: '"${{ github.action_path }}/../setup/install.sh" install'
+      env:
+        SETUP_VERSION: ${{ inputs.version }}
+        SETUP_SPCOMP: ${{ steps.plan.outputs.needs-spcomp }}
+        SETUP_32BIT_RUNTIME: ${{ steps.plan.outputs.needs-32bit-runtime }}
+        SETUP_ACTION_REF: ${{ github.action_ref }}
+        SETUP_ACTION_REPOSITORY: ${{ github.action_repository }}
+
+    - name: Compile and run the tests
+      id: run
+      shell: bash
+      run: python3 -I "${{ github.action_path }}/run.py" run "${{ steps.plan.outputs.plan }}"
+
+    - name: Upload the results
+      if: ${{ !cancelled() && inputs.upload == 'true' && steps.plan.outputs.results != '' }}
+      uses: actions/upload-artifact@v4
+      with:
+        name: ${{ steps.plan.outputs.artifact-name }}
+        path: ${{ steps.plan.outputs.results }}
+        if-no-files-found: error
+
+    - name: Fail on failed tests
+      if: steps.run.outputs.result == 'failure'
+      shell: bash
+      run: |
+        echo "::error title=smrunner test::smrunner test failed (${{ steps.run.outputs.failed }} of ${{ steps.run.outputs.tests }} tests failed)"
+        exit 1

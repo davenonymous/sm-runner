@@ -34,6 +34,7 @@ test_greeter.smx
 - [Requirements](#requirements)
 - [Installation](#installation)
 - [Quick start](#quick-start)
+- [GitHub Actions](#github-actions)
 - [Documentation](#documentation)
 - [Examples](#examples)
 - [AI disclosure](#ai-disclosure)
@@ -64,6 +65,9 @@ test_greeter.smx
   [SteamWorks](docs/steamworks.md).
 - **CI-friendly output.** Exit codes, a compact report and JUnit XML. See
   [Command line](docs/command-line.md).
+- **GitHub Actions.** Two actions install smrunner, compile your plugins and run their tests in
+  your repository's CI, with a job summary and annotations on failed assertions. See
+  [GitHub Actions](docs/github-actions.md).
 - **Run mode.** `smrunner run` loads plugins, runs commands and frames, and fails on any plugin
   error, without writing a test. See [Run mode](docs/run-mode.md).
 
@@ -81,9 +85,11 @@ test_greeter.smx
 
 smrunner ships as one archive with both runners, SourceMod's files and the include files. Download
 it from the [releases page](https://github.com/davenonymous/sm-runner/releases), or take the
-`smrunner-linux` artifact of a CI run. Then unpack it anywhere:
+`smrunner-linux` artifact of a CI run. Each archive has its SHA-256 in a `.sha256` file beside it.
+Check it, then unpack the archive anywhere:
 
 ```sh
+sha256sum -c smrunner-v0.1.0-linux.tar.gz.sha256
 tar -xzf smrunner-v0.1.0-linux.tar.gz -C /opt
 /opt/smrunner/bin/smrunner --version
 ```
@@ -179,6 +185,29 @@ When a test fails, the report names the assertion, the values and the line. Had 
           | ...
 ```
 
+## GitHub Actions
+
+In a plugin's own repository, the `setup` and `test` actions run the tests on every push:
+
+```yaml
+jobs:
+  test:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: davenonymous/sm-runner/setup@v0
+        with:
+          spcomp: true
+      - uses: davenonymous/sm-runner/test@v0
+        with:
+          tests: tests/test_*.sp
+          plugins: scripting/greeter.sp
+```
+
+They compile the `.sp` files with SourceMod 1.12's compiler, run the tests with both runners, and
+report the results as a job summary and as annotations. Every input is in
+[GitHub Actions](docs/github-actions.md).
+
 ## Documentation
 
 Next, follow the [ready-up tutorial](docs/tutorial-ready-up.md). The
@@ -187,6 +216,7 @@ Next, follow the [ready-up tutorial](docs/tutorial-ready-up.md). The
 - [Writing tests](docs/writing-tests.md): test structure, lifecycle, assertions.
 - [API reference](docs/api-reference.md): every native of `smrunner.inc`.
 - [Command line](docs/command-line.md): every option and exit code.
+- [GitHub Actions](docs/github-actions.md): the setup and test actions for CI.
 - [Limits](docs/limits.md): what does not work, and known issues.
 - [Troubleshooting](docs/troubleshooting.md): every message, and what to do about it.
 

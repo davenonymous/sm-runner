@@ -129,7 +129,9 @@ statically.
 | `scripting/include/` | `smrunner.inc` and `smrunner-steamworks.inc`. |
 | `examples/` | Example plugins with their tests. |
 | `tests/` | smrunner's own tests. |
-| `.github/workflows/ci.yml` | The build, the tests and the release. |
+| `setup/` | The setup action: `action.yml`, `install.sh` (shared with the test action) and `sourcemod.env`, the pinned SourceMod package. |
+| `test/` | The test action: `action.yml` and `run.py`, which plans, compiles, runs and reports. |
+| `.github/workflows/ci.yml` | The build, the tests, the actions' test and the release. |
 
 ## smrunner's own tests
 
@@ -153,9 +155,16 @@ statically.
 
 `run.sh` also checks the command line, sandboxes and drawn menus directly.
 
+CI's `action` job tests the setup and test actions with the archive the build made: team-admin and
+json-status compiled from their sources, and `tests/action/test_action_fails.sp`, whose passing,
+failing and skipped test check the action's outputs. `run.sh` does not run that plugin.
+
+A release publishes the archive with its `.sha256` file, which the setup action checks. A tag
+`vX.Y.Z` also moves the major tag `vX` to it, for plugins that use the actions at `@vX`.
+
 ## Pinned inputs
 
 CI pins every input of the build (SourceMod 1.12.0.7263 and its release package, Metamod:Source,
 AMBuild, the vcpkg libraries, SMJansson and SteamWorks' include) by commit or SHA-256, so a
-rebuild gets the same result. The pins live in `.github/workflows/ci.yml` and
-`packages/vcpkg/vcpkg.json`.
+rebuild gets the same result. The pins live in `.github/workflows/ci.yml`, `setup/sourcemod.env`
+(SourceMod's release package, which the setup action uses too) and `packages/vcpkg/vcpkg.json`.

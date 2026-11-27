@@ -516,7 +516,9 @@ Tests run in alphabetical order. Each one runs in its own process, so their orde
 
 For CI, add `--junit results.xml` to get a report your CI system can show. Run the tests with
 `smrunner64` too if the plugin also runs on 64-bit servers (see
-[Which runner](command-line.md#which-runner-smrunner-or-smrunner64)).
+[Which runner](command-line.md#which-runner-smrunner-or-smrunner64)). On GitHub, the
+[test action](github-actions.md) does all of this: it compiles the plugins, runs both runners and
+shows the results in the job summary.
 
 ## What to read next
 

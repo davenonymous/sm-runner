@@ -1,0 +1,78 @@
+# Copyright 2026 davenonymous
+#
+# Installs smrunner from a release of this repository (or from a local
+# archive), optionally with SourceMod's spcomp64 and include files, and puts
+# both on PATH. See docs/github-actions.md.
+
+name: Set up smrunner
+description: Installs smrunner, the test runner for SourceMod plugins, and optionally SourceMod's compiler.
+author: davenonymous
+branding:
+  icon: check-circle
+  color: orange
+
+inputs:
+  version:
+    description: >-
+      The smrunner release to install, for example 0.1.0. Default: the version of the tag the action
+      is used at (@v0.1.0 or @v0). Required when the action is used at a branch or a commit.
+    default: ''
+  archive:
+    description: >-
+      A local smrunner-*-linux.tar.gz to install instead of a release, for example a build artifact.
+      Excludes version.
+    default: ''
+  spcomp:
+    description: Also install spcomp64 and SourceMod's include files from SourceMod's release package.
+    default: 'false'
+  sourcemod-url:
+    description: >-
+      Another SourceMod Linux package (.tar.gz) to take spcomp64 and the include files from.
+      Default: SourceMod 1.12.0.7263, the SourceMod smrunner runs.
+    default: ''
+  sourcemod-sha256:
+    description: The SHA-256 of sourcemod-url. Without it, the package is not verified.
+    default: ''
+  install-32bit-runtime:
+    description: Install libc6-i386 and lib32stdc++6 with apt, which the 32-bit smrunner needs.
+    default: 'true'
+  cache:
+    description: Cache the installation between workflow runs (not with archive).
+    default: 'false'
+
+runs:
+  using: composite
+  steps:
+    - name: Resolve the smrunner version
+      id: resolve
+      shell: bash
+      run: '"${{ github.action_path }}/install.sh" resolve'
+      env:
+        SETUP_VERSION: ${{ inputs.version }}
+        SETUP_ARCHIVE: ${{ inputs.archive }}
+        SETUP_SPCOMP: ${{ inputs.spcomp }}
+        SETUP_SOURCEMOD_URL: ${{ inputs.sourcemod-url }}
+        SETUP_SOURCEMOD_SHA256: ${{ inputs.sourcemod-sha256 }}
+        SETUP_32BIT_RUNTIME: ${{ inputs.install-32bit-runtime }}
+        SETUP_ACTION_REF: ${{ github.action_ref }}
+        SETUP_ACTION_REPOSITORY: ${{ github.action_repository }}
+
+    - name: Restore the cached installation
+      if: inputs.cache == 'true' && inputs.archive == ''
+      uses: actions/cache@v4
+      with:
+        path: ${{ steps.resolve.outputs.cache-paths }}
+        key: ${{ steps.resolve.outputs.cache-key }}
+
+    - name: Install smrunner
+      shell: bash
+      run: '"${{ github.action_path }}/install.sh" install'
+      env:
+        SETUP_VERSION: ${{ inputs.version }}
+        SETUP_ARCHIVE: ${{ inputs.archive }}
+        SETUP_SPCOMP: ${{ inputs.spcomp }}
+        SETUP_SOURCEMOD_URL: ${{ inputs.sourcemod-url }}
+        SETUP_SOURCEMOD_SHA256: ${{ inputs.sourcemod-sha256 }}
+        SETUP_32BIT_RUNTIME: ${{ inputs.install-32bit-runtime }}
+        SETUP_ACTION_REF: ${{ github.action_ref }}
+        SETUP_ACTION_REPOSITORY: ${{ github.action_repository }}

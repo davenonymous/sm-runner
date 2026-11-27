@@ -16,6 +16,7 @@ smrunner runs SourceMod plugins and their tests on a simulated server. New here?
 | [Hooks and mocks](hooks-and-mocks.md) | Replacing and intercepting natives, arguments and results, providing missing natives |
 | [Breakpoints and plugin variables](breakpoints.md) | Reading and writing globals, breakpoints at lines and functions, locals |
 | [Run mode](run-mode.md) | `smrunner run`: loading plugins and running commands without tests |
+| [GitHub Actions](github-actions.md) | The setup and test actions: installing smrunner, compiling and testing plugins in CI, results |
 | [SteamWorks](steamworks.md) | The SteamWorks stand-in: routes, the mapping file, request checks, passthrough, record and replay, Steam state |
 
 ## Reference
