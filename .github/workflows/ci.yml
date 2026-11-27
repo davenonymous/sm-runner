@@ -349,8 +349,8 @@ jobs:
       - name: Download the archive
         uses: actions/download-artifact@v4
         with:
+          name: smrunner-linux
           path: archives
-          merge-multiple: true
 
       - name: Publish the release
         env:
